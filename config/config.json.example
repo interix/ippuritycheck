@@ -5,5 +5,6 @@
   "captcha_retry_wait": 60,
   "request_timeout": 10,
   "enable_location_check": true,
-  "allowed_countries": ["US", "United States"]
+  "allowed_countries": ["US", "United States"],
+  "consecutive_error_threshold": 2
 }

@@ -27,7 +27,8 @@ DEFAULT_CONFIG = {
     "captcha_retry_wait": 60,
     "request_timeout": 10,
     "enable_location_check": True,
-    "allowed_countries": ["US", "United States"]
+    "allowed_countries": ["US", "United States"],
+    "consecutive_error_threshold": 2
 }
 
 HEADERS = {
@@ -298,6 +299,34 @@ def send_captcha_alert() -> bool:
         return try_send_notification(0, "连续遇到 Cloudflare 人机验证！")
 
 
+def send_network_error_alert(count: int) -> bool:
+    """
+    触发 macOS 系统弹窗告警（连续网络失败）
+
+    Args:
+        count: 连续失败次数
+
+    Returns:
+        是否成功发送告警
+    """
+    try:
+        script = f'display dialog "连续{count}次获取网络数据失败，请检查网络连接！" buttons {{"知道了"}} default button "知道了" with icon stop with title "网络告警"'
+        result = subprocess.run(
+            ['osascript', '-e', script],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if result.returncode == 0:
+            return True
+        else:
+            log("ERROR", f"AppleScript 执行失败: {result.stderr}")
+            return try_send_notification(0, f"连续{count}次获取网络数据失败！")
+    except Exception as e:
+        log("ERROR", f"发送网络失败告警失败: {type(e).__name__}: {e}")
+        return try_send_notification(0, f"连续{count}次获取网络数据失败！")
+
+
 def try_send_notification(value: float, subtitle: str) -> bool:
     """
     备用方案：发送 macOS 通知中心通知
@@ -335,6 +364,7 @@ def main() -> None:
     risk_threshold = config.get("risk_threshold", DEFAULT_CONFIG["risk_threshold"])
     captcha_retry_wait = config.get("captcha_retry_wait", DEFAULT_CONFIG["captcha_retry_wait"])
     enable_location_check = config.get("enable_location_check", DEFAULT_CONFIG["enable_location_check"])
+    consecutive_error_threshold = config.get("consecutive_error_threshold", DEFAULT_CONFIG["consecutive_error_threshold"])
 
     log("INFO", f"风控监控程序启动")
     log("INFO", f"监控地址: {url}")
@@ -345,10 +375,13 @@ def main() -> None:
     if enable_location_check:
         allowed = config.get("allowed_countries", DEFAULT_CONFIG["allowed_countries"])
         log("INFO", f"允许的国家/地区: {allowed}")
+    log("INFO", f"连续网络失败告警阈值: {consecutive_error_threshold}次")
     log("INFO", "按 Ctrl+C 停止程序")
     print("-" * 60)
 
     consecutive_captcha = 0  # 连续遇到验证码的次数
+    consecutive_errors = 0  # 连续网络失败的次数
+    network_error_alert_sent = False  # 是否已发送网络失败告警
 
     try:
         while True:
@@ -356,6 +389,8 @@ def main() -> None:
 
             if status == FetchStatus.SUCCESS:
                 consecutive_captcha = 0  # 重置验证码计数
+                consecutive_errors = 0  # 重置网络失败计数
+                network_error_alert_sent = False
 
                 # 检查IP位置
                 location_alert_sent = False
@@ -377,6 +412,8 @@ def main() -> None:
                             log("INFO", f"当前风控值：{risk_value}%，状态正常")
 
             elif status == FetchStatus.CAPTCHA:
+                consecutive_errors = 0  # 重置网络失败计数
+                network_error_alert_sent = False
                 consecutive_captcha += 1
                 if consecutive_captcha == 1:
                     # 第一次遇到验证码，等待后重试
@@ -389,8 +426,15 @@ def main() -> None:
                     send_captcha_alert()
 
             else:  # ERROR
-                consecutive_captcha = 0
-                log("ERROR", "获取数据失败，跳过本轮")
+                consecutive_captcha = 0  # 重置验证码计数
+                consecutive_errors += 1
+                log("ERROR", f"获取数据失败，跳过本轮（连续{consecutive_errors}次失败）")
+
+                # 连续失败达到阈值且未发送过告警，则发送告警
+                if consecutive_errors >= consecutive_error_threshold and not network_error_alert_sent:
+                    log("ALERT", f"连续{consecutive_errors}次获取网络数据失败，触发告警！")
+                    send_network_error_alert(consecutive_errors)
+                    network_error_alert_sent = True
 
             # 等待下一轮检测
             time.sleep(check_interval)
