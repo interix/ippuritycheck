@@ -122,19 +122,21 @@ def extract_ip_location(soup: BeautifulSoup) -> str | None:
         位置字符串（如 "US California San Jose"），失败返回 None
     """
     try:
-        # 查找 IP 位置元素，格式类似：
-        # <div class="line loc"> ... US California San Jose ... </div>
+        # 查找 IP 位置元素
         loc_div = soup.find('div', class_='loc')
         if loc_div:
-            # 移除其中的链接元素（"错误提交"链接）
-            for a_tag in loc_div.find_all('a'):
-                a_tag.decompose()
-            # 获取清理后的文本
-            loc_text = loc_div.get_text(strip=True)
-            # 移除"IP 位置"前缀（如果存在）
-            if loc_text.startswith("IP 位置"):
-                loc_text = loc_text[4:].strip()
-            return loc_text
+            # 获取所有文本，然后清理
+            full_text = loc_div.get_text(strip=True)
+
+            # 移除"IP 位置"前缀
+            if full_text.startswith("IP 位置"):
+                full_text = full_text[5:].strip()
+
+            # 移除"错误提交"后缀
+            if full_text.endswith("错误提交"):
+                full_text = full_text[:-4].strip()
+
+            return full_text
         return None
     except Exception:
         return None
