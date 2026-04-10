@@ -44,7 +44,7 @@ def log(level: str, msg: str) -> None:
         msg: 日志消息
     """
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[{timestamp}] [{level:5s}] {msg}")
+    print(f"[{timestamp}] [{level:5s}] {msg}", flush=True)
 
 
 def is_captcha_page(soup: BeautifulSoup) -> bool:
