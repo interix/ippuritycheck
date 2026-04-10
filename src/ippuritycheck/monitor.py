@@ -126,7 +126,14 @@ def extract_ip_location(soup: BeautifulSoup) -> str | None:
         # <div class="line loc"> ... US California San Jose ... </div>
         loc_div = soup.find('div', class_='loc')
         if loc_div:
+            # 移除其中的链接元素（"错误提交"链接）
+            for a_tag in loc_div.find_all('a'):
+                a_tag.decompose()
+            # 获取清理后的文本
             loc_text = loc_div.get_text(strip=True)
+            # 移除"IP 位置"前缀（如果存在）
+            if loc_text.startswith("IP 位置"):
+                loc_text = loc_text[4:].strip()
             return loc_text
         return None
     except Exception:
