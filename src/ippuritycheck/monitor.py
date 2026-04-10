@@ -216,7 +216,8 @@ def fetch_data() -> tuple[FetchStatus, float | None, str | None]:
 
 def send_risk_alert(value: float) -> bool:
     """
-    触发 macOS 系统弹窗告警（风控值过高）
+    触发 macOS 系统告警（风控值过高）
+    优先使用通知中心，失败时使用弹窗
 
     Args:
         value: 当前风控值
@@ -224,31 +225,29 @@ def send_risk_alert(value: float) -> bool:
     Returns:
         是否成功发送告警
     """
+    # 优先使用通知中心
+    if try_send_notification(value, "值过高，存在风险！"):
+        return True
+
+    # 通知失败，使用弹窗（超时时间缩短）
     try:
-        # 使用 AppleScript 显示弹窗
         script = f'display dialog "当前风控值过高（当前值：{value}%），存在风险！" buttons {{"知道了"}} default button "知道了" with icon caution with title "风控告警"'
         result = subprocess.run(
             ['osascript', '-e', script],
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=5
         )
-        if result.returncode == 0:
-            return True
-        else:
-            log("ERROR", f"AppleScript 执行失败: {result.stderr}")
-            return try_send_notification(value, "值过高，存在风险！")
-    except subprocess.TimeoutExpired:
-        log("ERROR", "AppleScript 调用超时")
-        return try_send_notification(value, "值过高，存在风险！")
+        return result.returncode == 0
     except Exception as e:
-        log("ERROR", f"发送告警失败: {type(e).__name__}: {e}")
-        return try_send_notification(value, "值过高，存在风险！")
+        log("ERROR", f"发送弹窗告警失败: {type(e).__name__}: {e}")
+        return False
 
 
 def send_location_alert(location: str) -> bool:
     """
-    触发 macOS 系统弹窗告警（IP位置不在允许列表）
+    触发 macOS 系统告警（IP位置不在允许列表）
+    优先使用通知中心，失败时使用弹窗
 
     Args:
         location: 当前IP位置
@@ -256,52 +255,56 @@ def send_location_alert(location: str) -> bool:
     Returns:
         是否成功发送告警
     """
+    # 优先使用通知中心
+    if try_send_notification(0, f"IP位置异常：{location}"):
+        return True
+
+    # 通知失败，使用弹窗（超时时间缩短）
     try:
         script = f'display dialog "IP位置异常（当前位置：{location}），不在允许的国家列表中！" buttons {{"知道了"}} default button "知道了" with icon stop with title "位置告警"'
         result = subprocess.run(
             ['osascript', '-e', script],
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=5
         )
-        if result.returncode == 0:
-            return True
-        else:
-            log("ERROR", f"AppleScript 执行失败: {result.stderr}")
-            return try_send_notification(0, f"IP位置异常：{location}")
+        return result.returncode == 0
     except Exception as e:
-        log("ERROR", f"发送位置告警失败: {type(e).__name__}: {e}")
-        return try_send_notification(0, f"IP位置异常：{location}")
+        log("ERROR", f"发送位置弹窗告警失败: {type(e).__name__}: {e}")
+        return False
 
 
 def send_captcha_alert() -> bool:
     """
-    触发 macOS 系统弹窗告警（连续遇到验证码）
+    触发 macOS 系统告警（连续遇到验证码）
+    优先使用通知中心，失败时使用弹窗
 
     Returns:
         是否成功发送告警
     """
+    # 优先使用通知中心
+    if try_send_notification(0, "连续遇到 Cloudflare 人机验证！"):
+        return True
+
+    # 通知失败，使用弹窗（超时时间缩短）
     try:
         script = 'display dialog "连续遇到 Cloudflare 人机验证，需要手动处理！" buttons {"知道了"} default button "知道了" with icon stop with title "验证告警"'
         result = subprocess.run(
             ['osascript', '-e', script],
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=5
         )
-        if result.returncode == 0:
-            return True
-        else:
-            log("ERROR", f"AppleScript 执行失败: {result.stderr}")
-            return try_send_notification(0, "连续遇到 Cloudflare 人机验证！")
+        return result.returncode == 0
     except Exception as e:
-        log("ERROR", f"发送验证码告警失败: {type(e).__name__}: {e}")
-        return try_send_notification(0, "连续遇到 Cloudflare 人机验证！")
+        log("ERROR", f"发送验证码弹窗告警失败: {type(e).__name__}: {e}")
+        return False
 
 
 def send_network_error_alert(count: int) -> bool:
     """
-    触发 macOS 系统弹窗告警（连续网络失败）
+    触发 macOS 系统告警（连续网络失败）
+    优先使用通知中心，失败时使用弹窗
 
     Args:
         count: 连续失败次数
@@ -309,22 +312,23 @@ def send_network_error_alert(count: int) -> bool:
     Returns:
         是否成功发送告警
     """
+    # 优先使用通知中心
+    if try_send_notification(0, f"连续{count}次获取网络数据失败！"):
+        return True
+
+    # 通知失败，使用弹窗（超时时间缩短）
     try:
         script = f'display dialog "连续{count}次获取网络数据失败，请检查网络连接！" buttons {{"知道了"}} default button "知道了" with icon stop with title "网络告警"'
         result = subprocess.run(
             ['osascript', '-e', script],
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=5
         )
-        if result.returncode == 0:
-            return True
-        else:
-            log("ERROR", f"AppleScript 执行失败: {result.stderr}")
-            return try_send_notification(0, f"连续{count}次获取网络数据失败！")
+        return result.returncode == 0
     except Exception as e:
-        log("ERROR", f"发送网络失败告警失败: {type(e).__name__}: {e}")
-        return try_send_notification(0, f"连续{count}次获取网络数据失败！")
+        log("ERROR", f"发送网络失败弹窗告警失败: {type(e).__name__}: {e}")
+        return False
 
 
 def try_send_notification(value: float, subtitle: str) -> bool:
