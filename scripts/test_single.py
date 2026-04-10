@@ -9,9 +9,11 @@ import os
 # 添加 src 目录到路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from ippuritycheck.monitor import fetch_risk_value, log, FetchStatus
+from ippuritycheck.monitor import fetch_risk_value, log, FetchStatus, load_config, config
 
 def main():
+    # 先加载配置
+    load_config()
     log("INFO", "开始单次测试获取风控值...")
     status, risk_value = fetch_risk_value()
 

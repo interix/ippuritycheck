@@ -21,6 +21,9 @@ monitor.log
 ping0_page.html
 .DS_Store
 
+# Config (local only)
+config/config.json
+
 # IDE
 .vscode/
 .idea/

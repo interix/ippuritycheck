@@ -7,6 +7,8 @@ macOS 风控监控小程序
 import sys
 import time
 import subprocess
+import json
+import os
 from datetime import datetime
 from enum import Enum
 
@@ -17,15 +19,21 @@ import urllib3
 # 禁用 SSL 警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# ==================== 配置常量 ====================
-URL = "https://ping0.cc"
-CHECK_INTERVAL = 10  # 检测间隔（秒）
-RISK_THRESHOLD = 20  # 风控阈值（百分比）
-CAPTCHA_RETRY_WAIT = 60  # 遇到验证码等待时间（秒）
-REQUEST_TIMEOUT = 10
+# ==================== 默认配置 ====================
+DEFAULT_CONFIG = {
+    "url": "https://ping0.cc",
+    "check_interval": 10,
+    "risk_threshold": 20,
+    "captcha_retry_wait": 60,
+    "request_timeout": 10
+}
+
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
+
+# 全局配置变量
+config = {}
 
 
 class FetchStatus(Enum):
@@ -33,6 +41,38 @@ class FetchStatus(Enum):
     SUCCESS = "success"
     CAPTCHA = "captcha"
     ERROR = "error"
+
+
+def load_config(config_path: str = None) -> dict:
+    """
+    加载配置文件
+
+    Args:
+        config_path: 配置文件路径，默认使用 config/config.json
+
+    Returns:
+        配置字典
+    """
+    if config_path is None:
+        # 默认配置文件路径：项目根目录的 config/config.json
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(os.path.dirname(script_dir))
+        config_path = os.path.join(project_root, "config", "config.json")
+
+    if not os.path.exists(config_path):
+        print(f"[WARN] 配置文件不存在: {config_path}，使用默认配置")
+        return DEFAULT_CONFIG.copy()
+
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            loaded_config = json.load(f)
+        # 合并默认配置
+        result = DEFAULT_CONFIG.copy()
+        result.update(loaded_config)
+        return result
+    except Exception as e:
+        print(f"[WARN] 读取配置文件失败: {e}，使用默认配置")
+        return DEFAULT_CONFIG.copy()
 
 
 def log(level: str, msg: str) -> None:
@@ -77,7 +117,10 @@ def fetch_risk_value() -> tuple[FetchStatus, float | None]:
         状态: SUCCESS-成功, CAPTCHA-遇到验证, ERROR-其他错误
     """
     try:
-        response = requests.get(URL, headers=HEADERS, timeout=REQUEST_TIMEOUT, verify=False)
+        url = config.get("url", DEFAULT_CONFIG["url"])
+        timeout = config.get("request_timeout", DEFAULT_CONFIG["request_timeout"])
+
+        response = requests.get(url, headers=HEADERS, timeout=timeout, verify=False)
 
         if response.status_code != 200:
             log("ERROR", f"HTTP 请求失败，状态码: {response.status_code}")
@@ -207,11 +250,19 @@ def try_send_notification(value: float, subtitle: str) -> bool:
 
 def main() -> None:
     """主循环入口"""
+    global config
+    config = load_config()
+
+    url = config.get("url", DEFAULT_CONFIG["url"])
+    check_interval = config.get("check_interval", DEFAULT_CONFIG["check_interval"])
+    risk_threshold = config.get("risk_threshold", DEFAULT_CONFIG["risk_threshold"])
+    captcha_retry_wait = config.get("captcha_retry_wait", DEFAULT_CONFIG["captcha_retry_wait"])
+
     log("INFO", f"风控监控程序启动")
-    log("INFO", f"监控地址: {URL}")
-    log("INFO", f"检测间隔: {CHECK_INTERVAL}秒")
-    log("INFO", f"告警阈值: {RISK_THRESHOLD}%")
-    log("INFO", f"验证码重试等待: {CAPTCHA_RETRY_WAIT}秒")
+    log("INFO", f"监控地址: {url}")
+    log("INFO", f"检测间隔: {check_interval}秒")
+    log("INFO", f"告警阈值: {risk_threshold}%")
+    log("INFO", f"验证码重试等待: {captcha_retry_wait}秒")
     log("INFO", "按 Ctrl+C 停止程序")
     print("-" * 60)
 
@@ -223,7 +274,7 @@ def main() -> None:
 
             if status == FetchStatus.SUCCESS:
                 consecutive_captcha = 0  # 重置验证码计数
-                if risk_value > RISK_THRESHOLD:
+                if risk_value > risk_threshold:
                     log("ALERT", f"当前风控值：{risk_value}%，触发告警！")
                     send_alert(risk_value)
                 else:
@@ -233,8 +284,8 @@ def main() -> None:
                 consecutive_captcha += 1
                 if consecutive_captcha == 1:
                     # 第一次遇到验证码，等待后重试
-                    log("INFO", f"等待 {CAPTCHA_RETRY_WAIT} 秒后重试...")
-                    time.sleep(CAPTCHA_RETRY_WAIT)
+                    log("INFO", f"等待 {captcha_retry_wait} 秒后重试...")
+                    time.sleep(captcha_retry_wait)
                     continue  # 跳过后面的 sleep，直接进入下一轮
                 else:
                     # 连续遇到验证码，触发告警
@@ -246,7 +297,7 @@ def main() -> None:
                 log("ERROR", "获取风控值失败，跳过本轮")
 
             # 等待下一轮检测
-            time.sleep(CHECK_INTERVAL)
+            time.sleep(check_interval)
 
     except KeyboardInterrupt:
         print("\n" + "-" * 60)

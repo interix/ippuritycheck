@@ -58,23 +58,36 @@ make stop
 
 ## 配置
 
-编辑 [src/ippuritycheck/monitor.py](src/ippuritycheck/monitor.py) 中的常量：
+复制配置示例文件并修改：
 
-| 常量 | 说明 | 默认值 |
-|-----|------|-------|
-| `CHECK_INTERVAL` | 检测间隔（秒） | 10 |
-| `RISK_THRESHOLD` | 告警阈值（百分比） | 20 |
+```bash
+cp config/config.json.example config/config.json
+```
+
+编辑 [config/config.json](config/config.json)：
+
+| 配置项 | 说明 | 默认值 |
+|--------|------|-------|
+| `url` | 监控地址 | https://ping0.cc |
+| `check_interval` | 检测间隔（秒） | 10 |
+| `risk_threshold` | 告警阈值（百分比） | 20 |
+| `captcha_retry_wait` | 遇到验证码等待时间（秒） | 60 |
+| `request_timeout` | 请求超时（秒） | 10 |
 
 ## 项目结构
 
 ```
 ippuritycheck/
+├── config/
+│   ├── config.json              # 配置文件（需从 config.json.example 复制）
+│   └── config.json.example      # 配置文件示例
 ├── src/
 │   └── ippuritycheck/
 │       └── monitor.py          # 主监控程序
 ├── tests/                      # 测试目录（预留）
 ├── scripts/
-│   └── analyze_ping0.py        # 页面结构分析脚本
+│   ├── analyze_ping0.py        # 页面结构分析脚本
+│   └── test_single.py          # 单次测试脚本
 ├── docs/plans/                 # 项目计划归档
 ├── rules/                      # 工程规范
 ├── Makefile                     # 工程统一入口
