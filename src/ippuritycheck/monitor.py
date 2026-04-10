@@ -25,7 +25,9 @@ DEFAULT_CONFIG = {
     "check_interval": 10,
     "risk_threshold": 20,
     "captcha_retry_wait": 60,
-    "request_timeout": 10
+    "request_timeout": 10,
+    "enable_location_check": True,
+    "allowed_countries": ["US", "United States"]
 }
 
 HEADERS = {
@@ -108,12 +110,56 @@ def is_captcha_page(soup: BeautifulSoup) -> bool:
     return False
 
 
-def fetch_risk_value() -> tuple[FetchStatus, float | None]:
+def extract_ip_location(soup: BeautifulSoup) -> str | None:
     """
-    获取风控值
+    从页面中提取IP位置信息
+
+    Args:
+        soup: BeautifulSoup 对象
 
     Returns:
-        (状态, 风控值或None)
+        位置字符串（如 "US California San Jose"），失败返回 None
+    """
+    try:
+        # 查找 IP 位置元素，格式类似：
+        # <div class="line loc"> ... US California San Jose ... </div>
+        loc_div = soup.find('div', class_='loc')
+        if loc_div:
+            loc_text = loc_div.get_text(strip=True)
+            return loc_text
+        return None
+    except Exception:
+        return None
+
+
+def is_location_allowed(location: str) -> bool:
+    """
+    检查IP位置是否在允许的国家列表中
+
+    Args:
+        location: 位置字符串
+
+    Returns:
+        是否允许
+    """
+    if not location:
+        return False
+
+    allowed_countries = config.get("allowed_countries", DEFAULT_CONFIG["allowed_countries"])
+    location_upper = location.upper()
+
+    for country in allowed_countries:
+        if country.upper() in location_upper:
+            return True
+    return False
+
+
+def fetch_data() -> tuple[FetchStatus, float | None, str | None]:
+    """
+    获取风控值和IP位置
+
+    Returns:
+        (状态, 风控值或None, 位置或None)
         状态: SUCCESS-成功, CAPTCHA-遇到验证, ERROR-其他错误
     """
     try:
@@ -124,47 +170,50 @@ def fetch_risk_value() -> tuple[FetchStatus, float | None]:
 
         if response.status_code != 200:
             log("ERROR", f"HTTP 请求失败，状态码: {response.status_code}")
-            return FetchStatus.ERROR, None
+            return FetchStatus.ERROR, None, None
 
         soup = BeautifulSoup(response.text, 'html.parser')
 
         # 检查是否是验证页面
         if is_captcha_page(soup):
             log("ERROR", "遇到 Cloudflare Turnstile 人机验证")
-            return FetchStatus.CAPTCHA, None
+            return FetchStatus.CAPTCHA, None, None
+
+        # 提取IP位置
+        location = extract_ip_location(soup)
 
         # 查找风控值: <span class="value">9%</span>
         value_span = soup.find('span', class_='value')
         if not value_span:
             log("ERROR", "未找到风控值元素")
-            return FetchStatus.ERROR, None
+            return FetchStatus.ERROR, None, location
 
         value_text = value_span.get_text(strip=True)
         if not value_text:
             log("ERROR", "风控值文本为空")
-            return FetchStatus.ERROR, None
+            return FetchStatus.ERROR, None, location
 
         # 移除百分号并转换为数字
         value_str = value_text.replace('%', '').strip()
         try:
             risk_value = float(value_str)
-            return FetchStatus.SUCCESS, risk_value
+            return FetchStatus.SUCCESS, risk_value, location
         except ValueError:
             log("ERROR", f"无法转换风控值为数字: {value_text}")
-            return FetchStatus.ERROR, None
+            return FetchStatus.ERROR, None, location
 
     except requests.exceptions.Timeout:
         log("ERROR", "网络请求超时")
-        return FetchStatus.ERROR, None
+        return FetchStatus.ERROR, None, None
     except requests.exceptions.ConnectionError as e:
         log("ERROR", f"网络连接失败: {e}")
-        return FetchStatus.ERROR, None
+        return FetchStatus.ERROR, None, None
     except Exception as e:
-        log("ERROR", f"获取风控值时发生错误: {type(e).__name__}: {e}")
-        return FetchStatus.ERROR, None
+        log("ERROR", f"获取数据时发生错误: {type(e).__name__}: {e}")
+        return FetchStatus.ERROR, None, None
 
 
-def send_alert(value: float) -> bool:
+def send_risk_alert(value: float) -> bool:
     """
     触发 macOS 系统弹窗告警（风控值过高）
 
@@ -194,6 +243,34 @@ def send_alert(value: float) -> bool:
     except Exception as e:
         log("ERROR", f"发送告警失败: {type(e).__name__}: {e}")
         return try_send_notification(value, "值过高，存在风险！")
+
+
+def send_location_alert(location: str) -> bool:
+    """
+    触发 macOS 系统弹窗告警（IP位置不在允许列表）
+
+    Args:
+        location: 当前IP位置
+
+    Returns:
+        是否成功发送告警
+    """
+    try:
+        script = f'display dialog "IP位置异常（当前位置：{location}），不在允许的国家列表中！" buttons {{"知道了"}} default button "知道了" with icon stop with title "位置告警"'
+        result = subprocess.run(
+            ['osascript', '-e', script],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if result.returncode == 0:
+            return True
+        else:
+            log("ERROR", f"AppleScript 执行失败: {result.stderr}")
+            return try_send_notification(0, f"IP位置异常：{location}")
+    except Exception as e:
+        log("ERROR", f"发送位置告警失败: {type(e).__name__}: {e}")
+        return try_send_notification(0, f"IP位置异常：{location}")
 
 
 def send_captcha_alert() -> bool:
@@ -257,12 +334,17 @@ def main() -> None:
     check_interval = config.get("check_interval", DEFAULT_CONFIG["check_interval"])
     risk_threshold = config.get("risk_threshold", DEFAULT_CONFIG["risk_threshold"])
     captcha_retry_wait = config.get("captcha_retry_wait", DEFAULT_CONFIG["captcha_retry_wait"])
+    enable_location_check = config.get("enable_location_check", DEFAULT_CONFIG["enable_location_check"])
 
     log("INFO", f"风控监控程序启动")
     log("INFO", f"监控地址: {url}")
     log("INFO", f"检测间隔: {check_interval}秒")
     log("INFO", f"告警阈值: {risk_threshold}%")
     log("INFO", f"验证码重试等待: {captcha_retry_wait}秒")
+    log("INFO", f"IP位置检查: {'启用' if enable_location_check else '禁用'}")
+    if enable_location_check:
+        allowed = config.get("allowed_countries", DEFAULT_CONFIG["allowed_countries"])
+        log("INFO", f"允许的国家/地区: {allowed}")
     log("INFO", "按 Ctrl+C 停止程序")
     print("-" * 60)
 
@@ -270,15 +352,29 @@ def main() -> None:
 
     try:
         while True:
-            status, risk_value = fetch_risk_value()
+            status, risk_value, location = fetch_data()
 
             if status == FetchStatus.SUCCESS:
                 consecutive_captcha = 0  # 重置验证码计数
-                if risk_value > risk_threshold:
-                    log("ALERT", f"当前风控值：{risk_value}%，触发告警！")
-                    send_alert(risk_value)
-                else:
-                    log("INFO", f"当前风控值：{risk_value}%，状态正常")
+
+                # 检查IP位置
+                location_alert_sent = False
+                if enable_location_check and location:
+                    if not is_location_allowed(location):
+                        log("ALERT", f"IP位置异常：{location}，触发告警！")
+                        send_location_alert(location)
+                        location_alert_sent = True
+                    else:
+                        log("INFO", f"IP位置：{location}，状态正常")
+
+                # 检查风控值（即使位置异常也要检查）
+                if risk_value is not None:
+                    if risk_value > risk_threshold:
+                        log("ALERT", f"当前风控值：{risk_value}%，触发告警！")
+                        send_risk_alert(risk_value)
+                    else:
+                        if not location_alert_sent:
+                            log("INFO", f"当前风控值：{risk_value}%，状态正常")
 
             elif status == FetchStatus.CAPTCHA:
                 consecutive_captcha += 1
@@ -294,7 +390,7 @@ def main() -> None:
 
             else:  # ERROR
                 consecutive_captcha = 0
-                log("ERROR", "获取风控值失败，跳过本轮")
+                log("ERROR", "获取数据失败，跳过本轮")
 
             # 等待下一轮检测
             time.sleep(check_interval)
