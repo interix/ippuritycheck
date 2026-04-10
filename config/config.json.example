@@ -1,0 +1,7 @@
+{
+  "url": "https://ping0.cc",
+  "check_interval": 10,
+  "risk_threshold": 20,
+  "captcha_retry_wait": 60,
+  "request_timeout": 10
+}
